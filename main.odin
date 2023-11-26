@@ -19,30 +19,10 @@ TilePos :: enum {
   Required,
 }
 
-width :: 128
-height :: 128
-
 tile_size :: 64
 grid_size :: Coord{16, 16}
 
-frag_test :: proc(uv: la.Vector2f64) -> la.Vector3f64 {
-  return {
-    math.cos(uv.x),
-    math.sin(uv.y),
-    0.0
-  }
-}
-
-frag_japan :: proc(uv: la.Vector2f64) -> la.Vector3f64 {
-  co: la.Vector2f64 = 0.5
-  cr := 0.25
-  ch := la.distance(uv, co)
-  if ch < cr {
-    return {1, 0, 0}
-  } else {
-    return {1, 1, 1}
-  }
-}
+rng := rand.create(u64(time.time_to_unix(time.now())))
 
 frag_tile_circle :: proc(uv: la.Vector2f64, mask: u8) -> la.Vector3f64 {
   co: la.Vector2f64 = 0.5
@@ -125,43 +105,21 @@ frag_tile_triangle :: proc(uv: la.Vector2f64, mask: u8) -> la.Vector3f64 {
   return c
 }
 
-create_edges :: proc(bit_mask: u8) -> [dynamic]la.Vector2f64 {
-  edges: [dynamic]la.Vector2f64 = {}
-
-  if bit_mask & 0b1 > 0 {
-    append(&edges, la.Vector2f64{0.5, 0.0})
-  }
-
-  if (bit_mask >> 1) & 0b1 > 0 {
-    append(&edges, la.Vector2f64{1.0, 0.5})
-  }
-
-  if (bit_mask >> 2) & 0b1 > 0 {
-    append(&edges, la.Vector2f64{0.5, 1.0})
-  }
-
-  if (bit_mask >> 3) & 0b1 > 0 {
-    append(&edges, la.Vector2f64{0.0, 0.5})
-  }
-
-  return edges
-}
-
 // trbl = bit mask where it needs a top/right/bottom/left edge
-create_tile_mask :: proc(trbl: [4]TilePos, rng: ^rand.Rand = nil) -> u8 {
+create_tile_mask :: proc(trbl: [4]TilePos) -> u8 {
   edges: [dynamic]u8 = {}
 
   mask: u8 = 0
-  if trbl[0] == TilePos.Required || (trbl[0] == TilePos.Allowed && rand.int_max(2, rng) == 0) {
+  if trbl[0] == TilePos.Required || (trbl[0] == TilePos.Allowed && rand.int_max(2, &rng) == 0) {
     mask = mask | 0b0001
   }
-  if trbl[1] == TilePos.Required || (trbl[1] == TilePos.Allowed && rand.int_max(2, rng) == 0) {
+  if trbl[1] == TilePos.Required || (trbl[1] == TilePos.Allowed && rand.int_max(2, &rng) == 0) {
     mask = mask | 0b0010
   }
-  if trbl[2] == TilePos.Required || (trbl[2] == TilePos.Allowed && rand.int_max(2, rng) == 0) {
+  if trbl[2] == TilePos.Required || (trbl[2] == TilePos.Allowed && rand.int_max(2, &rng) == 0) {
     mask = mask | 0b0100
   }
-  if trbl[3] == TilePos.Required || (trbl[3] == TilePos.Allowed && rand.int_max(2, rng) == 0) {
+  if trbl[3] == TilePos.Required || (trbl[3] == TilePos.Allowed && rand.int_max(2, &rng) == 0) {
     mask = mask | 0b1000
   }
 
@@ -194,20 +152,17 @@ find_surrounding_coords :: proc(coord: Coord) -> [dynamic]Coord {
   return result
 }
 
-all_wang_tiles :: proc() {
-  data := make([]RGBA, width*height)
-  // data: [width*height]RGBA
+generate_wang_tiles :: proc(frag_fn: proc(la.Vector2f64, u8) -> la.Vector3f64) -> [][tile_size*tile_size]RGBA {
+  data := make([][tile_size*tile_size]RGBA, 16)
 
   for n in 0..=15 {
-    // edges := create_edges(u8(n))
+    for y := 0; y < tile_size; y += 1 {
+      for x := 0; x < tile_size; x += 1 {
+        u := f64(x) / f64(tile_size)
+        v := f64(y) / f64(tile_size)
+        c := frag_fn({u, v}, u8(n))
 
-    for y := 0; y < height; y += 1 {
-      for x := 0; x < width; x += 1 {
-        u := f64(x) / f64(width)
-        v := f64(y) / f64(height)
-        c := frag_tile_circle({u, v}, u8(n))
-
-        data[y*width+x] = RGBA{
+        data[n][y*tile_size+x] = RGBA{
           u8(c.r * 255),
           u8(c.g * 255),
           u8(c.b * 255),
@@ -215,11 +170,13 @@ all_wang_tiles :: proc() {
         }
       }
     }
-
-    filename := strings.clone_to_cstring(fmt.tprintf("output%d.png", n))
-    res := image.write_png(filename, width, height, 4, raw_data(data), width*4)
-    fmt.println(res)
+    
+    // TODO: run on debug flag
+    // filename := strings.clone_to_cstring(fmt.tprintf("output%d.png", n))
+    // res := image.write_png(filename, tile_size, tile_size, 4, &data[n], tile_size*4)
   }
+
+  return data
 }
 
 generate_mask :: proc(current: Coord, masks: ^[]u8, surrounding: ^[dynamic]Coord, seen_tiles: ^map[Coord]bool) -> [4]TilePos {
@@ -277,33 +234,17 @@ generate_mask :: proc(current: Coord, masks: ^[]u8, surrounding: ^[dynamic]Coord
   return result
 }
 
-main :: proc() {
-  // all_wang_tiles()
-
-  rng := rand.create(u64(time.time_to_unix(time.now())))
-  masks := make([]u8, grid_size.x*grid_size.y)
-
-  // 1. set a random tile at a random location
-  first_x := rand.int_max(grid_size.x, &rng)
-  first_y := rand.int_max(grid_size.y, &rng)
-
-  fmt.printf("first: %d,%d\n", first_x, first_y)
-
-  masks[first_y*grid_size.x+first_x] = u8(rand.int_max(16, &rng))
-
-  fmt.printf("set %d,%d to %4b\n", first_x, first_y, masks[first_y*grid_size.x+first_x])
-
-  // 2. expand to surrounding tiles until we've set every bitmask
+fill_grid :: proc(grid: ^[]u8, start: Coord) {
   seen_tiles := make(map[Coord]bool)
   defer delete(seen_tiles)
-  seen_tiles[{first_x, first_y}] = true
+  seen_tiles[start] = true
 
   q: queue.Queue(Coord)
   queue.init(&q)
 
-  surrounding := find_surrounding_coords({first_x, first_y})
+  surrounding := find_surrounding_coords(start)
   queue.push_back_elems(&q, ..surrounding[:])
-
+  
   for queue.len(q) > 0 {
     current := queue.pop_front(&q)
     if current in seen_tiles {
@@ -312,18 +253,10 @@ main :: proc() {
     seen_tiles[current] = true
 
     surrounding := find_surrounding_coords(current)
-    mask := generate_mask(current, &masks, &surrounding, &seen_tiles)
-    // if (masks[(current.y-1)*grid_size.x+current.x] & 4 > 0? 1 : 0)
-    possible_tiles := create_tile_mask(mask, &rng)
-    masks[current.y*grid_size.x+current.x] = possible_tiles
-    // if len(possible_tiles) == 1 {
-    //   masks[current.y*grid_size.x+current.x] = possible_tiles[0]
-    // } else if len(possible_tiles) > 1 {
-    //   n := rand.int_max(len(possible_tiles), &rng)
-    //   masks[current.y*grid_size.x+current.x] = possible_tiles[n]
-    // }
-    fmt.printf("set %d,%d (%4b) to %4b\n", current.x, current.y, mask, masks[current.y*grid_size.x+current.x])
-    // fmt.printf("%v\n", current)
+    mask := generate_mask(current, grid, &surrounding, &seen_tiles)
+    possible_tiles := create_tile_mask(mask)
+    grid[current.y*grid_size.x+current.x] = possible_tiles
+    fmt.printf("set %d,%d (%4b) to %4b\n", current.x, current.y, mask, grid[current.y*grid_size.x+current.x])
 
     for t in surrounding {
       if t not_in seen_tiles {
@@ -331,65 +264,46 @@ main :: proc() {
       }
     }
   }
+}
 
-  fmt.printf("%#v\n", len(masks))
-
-  // 3. Render tiles
+render_grid :: proc(grid: ^[]u8, tiles: ^[][tile_size*tile_size]RGBA) -> []RGBA {
   data := make([]RGBA, grid_size.x*grid_size.y*tile_size*tile_size)
   
   for grid_y := 0; grid_y < grid_size.y; grid_y += 1 {
     for grid_x := 0; grid_x < grid_size.x; grid_x += 1 {
+      tile := grid[grid_y*grid_size.x+grid_x]
       for y := 0; y < tile_size; y += 1 {
         for x := 0; x < tile_size; x += 1 {
-          u := f64(x) / f64(tile_size)
-          v := f64(y) / f64(tile_size)
-          // edges := create_edges(masks[grid_y*grid_size.x+grid_x])
-          c := frag_tile_circle({u, v}, masks[grid_y*grid_size.x+grid_x])
-          // c := frag_tile_triangle({u, v}, masks[grid_y*grid_size.x+grid_x])
-          // c := frag_japan({u, v})
-
-          // 0  1    2  3
-          // 4  5    6  7
-          //
-          // 8  9    10 11
-          // 12 13   14 15
-          
-          // y*width + x
           px := (grid_y*tile_size+y)*(grid_size.x*tile_size) + (grid_x*tile_size) + x
-          data[px] = RGBA{
-            u8(c.r * 255),
-            u8(c.g * 255),
-            u8(c.b * 255),
-            255
-          }
+          data[px] = tiles[tile][y*tile_size+x]
         }
       }
     }
   }
+
+  return data
+}
+
+main :: proc() {
+  // generate_wang_tiles()
+  
+  // 1. Generate all tiles
+  tiles := generate_wang_tiles(frag_tile_triangle)
+
+  // 2. Generate grid with starting tile
+  grid := make([]u8, grid_size.x*grid_size.y)
+
+  first_x := rand.int_max(grid_size.x, &rng)
+  first_y := rand.int_max(grid_size.y, &rng)
+
+  grid[first_y*grid_size.x+first_x] = u8(rand.int_max(16, &rng))
+
+  // 3. Fill grid
+  fill_grid(&grid, {first_x, first_y})
+
+  // 4. Render
+  data := render_grid(&grid, &tiles)
   
   res := image.write_png("output.png", i32(grid_size.x*tile_size), i32(grid_size.y*tile_size), 4, raw_data(data), i32(grid_size.x*tile_size*4))
   fmt.println(res)
-
-  // a := la.Vector3f64{1.0, 0.0, 0.0}
-  // fmt.printf("%.1f %.1f %.1f\n", a.r, a.g, a.b)
-  
-  // data := make([]RGBA, width*height)
-
-  // for y := 0; y < height; y += 1 {
-  //   for x := 0; x < width; x += 1 {
-  //     u := f64(x) / f64(width)
-  //     v := f64(y) / f64(height)
-  //     c := frag_japan({u, v})
-
-  //     data[y*width+x] = RGBA{
-  //       u8(c.r * 255),
-  //       u8(c.g * 255),
-  //       u8(c.b * 255),
-  //       255
-  //     }
-  //   }
-  // }
-
-  // res := image.write_png("test.png", width, height, 4, raw_data(data), width*4)
-  // fmt.println(res)
 }
