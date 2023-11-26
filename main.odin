@@ -6,6 +6,7 @@ import "core:math/rand"
 import "core:time"
 import "core:strings"
 import "core:container/queue"
+import "core:os"
 import la "core:math/linalg"
 import "vendor:stb/image"
 
@@ -23,6 +24,9 @@ tile_size :: 64
 grid_size :: Coord{16, 16}
 
 rng := rand.create(u64(time.time_to_unix(time.now())))
+
+pattern := "circle"
+debug := false
 
 frag_tile_circle :: proc(uv: la.Vector2f64, mask: u8) -> la.Vector3f64 {
   co: la.Vector2f64 = 0.5
@@ -123,12 +127,6 @@ create_tile_mask :: proc(trbl: [4]TilePos) -> u8 {
     mask = mask | 0b1000
   }
 
-  // for n in 0..=15 {
-  //   if trbl &~ u8(n) == 0 {
-  //     append(&edges, u8(n))
-  //   }
-  // }
-
   return mask
 }
 
@@ -171,9 +169,10 @@ generate_wang_tiles :: proc(frag_fn: proc(la.Vector2f64, u8) -> la.Vector3f64) -
       }
     }
     
-    // TODO: run on debug flag
-    // filename := strings.clone_to_cstring(fmt.tprintf("output%d.png", n))
-    // res := image.write_png(filename, tile_size, tile_size, 4, &data[n], tile_size*4)
+    if debug {
+      filename := strings.clone_to_cstring(fmt.tprintf("output%d.png", n))
+      res := image.write_png(filename, tile_size, tile_size, 4, &data[n], tile_size*4)
+    }
   }
 
   return data
@@ -182,7 +181,7 @@ generate_wang_tiles :: proc(frag_fn: proc(la.Vector2f64, u8) -> la.Vector3f64) -
 generate_mask :: proc(current: Coord, masks: ^[]u8, surrounding: ^[dynamic]Coord, seen_tiles: ^map[Coord]bool) -> [4]TilePos {
   result: [4]TilePos
 
-  fmt.printf("surrounding: %d\n", len(surrounding))
+  // fmt.printf("surrounding: %d\n", len(surrounding))
 
   // TODO: clean up
   checked_sides: u8 = 0
@@ -193,41 +192,41 @@ generate_mask :: proc(current: Coord, masks: ^[]u8, surrounding: ^[dynamic]Coord
     
     mask := masks[t.y*grid_size.x+t.x]
     if t.y < current.y {
-      fmt.printf("found tile above: %4b\n", mask)
+      // fmt.printf("found tile above: %4b\n", mask)
       checked_sides = checked_sides | 0b0001
       result[0] = mask & 0b0100 > 0 ? TilePos.Required : TilePos.Disallowed
     }
     if t.y > current.y {
-      fmt.printf("found tile below: %4b\n", mask)
+      // fmt.printf("found tile below: %4b\n", mask)
       checked_sides = checked_sides | 0b0100
       result[2] = mask & 0b0001 > 0 ? TilePos.Required : TilePos.Disallowed
     }
     if t.x < current.x {
-      fmt.printf("found tile left: %4b\n", mask)
+      // fmt.printf("found tile left: %4b\n", mask)
       checked_sides = checked_sides | 0b1000
       result[3] = mask & 0b0010 > 0 ? TilePos.Required : TilePos.Disallowed
     }
     if t.x > current.x {
-      fmt.printf("found tile right: %4b\n", mask)
+      // fmt.printf("found tile right: %4b\n", mask)
       checked_sides = checked_sides | 0b0010
       result[1] = mask & 0b1000 > 0 ? TilePos.Required : TilePos.Disallowed
     }
   }
 
   if checked_sides & 0b0001 == 0 {
-    fmt.println("no tile above")
+    // fmt.println("no tile above")
     result[0] = TilePos.Allowed
   }
   if checked_sides & 0b0010 == 0 {
-    fmt.println("no tile right")
+    // fmt.println("no tile right")
     result[1] = TilePos.Allowed
   }
   if checked_sides & 0b0100 == 0 {
-    fmt.println("no tile below")
+    // fmt.println("no tile below")
     result[2] = TilePos.Allowed
   }
   if checked_sides & 0b1000 == 0 {
-    fmt.println("no tile left")
+    // fmt.println("no tile left")
     result[3] = TilePos.Allowed
   }
 
@@ -256,7 +255,7 @@ fill_grid :: proc(grid: ^[]u8, start: Coord) {
     mask := generate_mask(current, grid, &surrounding, &seen_tiles)
     possible_tiles := create_tile_mask(mask)
     grid[current.y*grid_size.x+current.x] = possible_tiles
-    fmt.printf("set %d,%d (%4b) to %4b\n", current.x, current.y, mask, grid[current.y*grid_size.x+current.x])
+    // fmt.printf("set %d,%d (%4b) to %4b\n", current.x, current.y, mask, grid[current.y*grid_size.x+current.x])
 
     for t in surrounding {
       if t not_in seen_tiles {
@@ -284,11 +283,49 @@ render_grid :: proc(grid: ^[]u8, tiles: ^[][tile_size*tile_size]RGBA) -> []RGBA 
   return data
 }
 
+print_help :: proc() {
+  fmt.println("usage: odin-wang-tiles [options]\n")
+  fmt.println("Options:")
+  fmt.println(" -d            enable debug output")
+  fmt.println(" -h            show help")
+  fmt.println(" -p <pattern>  set pattern (default: circle)")
+}
+
 main :: proc() {
+  argc := len(os.args)
+  if argc > 1 {
+    for i := 1; i < argc; i += 1 {
+      if os.args[i] == "-h" {
+        print_help()
+        os.exit(0)
+      }
+      
+      if os.args[i] == "-d" {
+        debug = true
+      }
+      
+      if os.args[i] == "-p" {
+        if i+1 >= argc {
+          fmt.println("ERROR: missing pattern value")
+          print_help()
+          os.exit(1)
+        }
+        // TODO: verify pattern
+        pattern = os.args[i+1]
+        i += 1
+      }
+    }
+  }
+
   // generate_wang_tiles()
   
   // 1. Generate all tiles
-  tiles := generate_wang_tiles(frag_tile_triangle)
+  frag := frag_tile_circle
+  if pattern == "triangle" {
+    frag = frag_tile_triangle
+  }
+  
+  tiles := generate_wang_tiles(frag)
 
   // 2. Generate grid with starting tile
   grid := make([]u8, grid_size.x*grid_size.y)
