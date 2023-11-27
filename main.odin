@@ -95,7 +95,7 @@ frag_tile_triangle :: proc(uv: la.Vector2f64, mask: u8) -> la.Vector3f64 {
     append(&edges, Triangle{{-1, -1}, {0.5, 0.5}, {-1, 2}})
   }
   
-  if point_in_square(uv, {0.20, 0.20}, {0.6, 0.6}) {
+  if point_in_square(uv, {0.25, 0.25}, {0.5, 0.5}) {
     n := f64(len(edges))
     return {0.25*n, 0.25*n, 0.25*n}
   }
