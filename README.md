@@ -6,7 +6,16 @@ Implementation of [Wang Tiles](https://en.wikipedia.org/wiki/Wang_tile) in Odin.
 
 ```
 $ odin build main.odin -file
-$ ./main
+$ ./main -h
+usage: odin-wang-tiles [options]
+
+Options:
+ -c <columns>  set grid columns (default: 16)
+ -d            enable debug output
+ -h            show help
+ -p <pattern>  set pattern (default: circle)
+ -r <rows>     set grid rows (default: 16)
+ -s <size>     set tile size in px (default: 64)
 ```
 
 ## Examples
